@@ -381,6 +381,15 @@ module aptos_std::big_ordered_map {
         iter.iter_borrow(self)
     }
 
+    public fun borrow_optional<K: drop + copy + store, V: copy + store>(self: &BigOrderedMap<K, V>, key: &K): Option<V> {
+        let iter = self.find(key);
+        if (iter.iter_is_end(self)) {
+            option::none()
+        } else {
+            option::some(*iter.iter_borrow(self))
+        }
+    }
+
     /// Returns a mutable reference to the element with its key at the given index, aborts if the key is not found.
     /// Aborts with EBORROW_MUT_REQUIRES_CONSTANT_KV_SIZE if KV size doesn't have constant size,
     /// because if it doesn't we cannot assert invariants on the size.
