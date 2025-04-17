@@ -144,6 +144,7 @@ pub enum FeatureFlag {
     NewAccountsDefaultToFaStore,
     DefaultAccountResource,
     JwkConsensusPerKeyMode,
+    EnableLazyLoading,
 }
 
 fn generate_features_blob(writer: &CodeWriter, data: &[u64]) {
@@ -383,6 +384,7 @@ impl From<FeatureFlag> for AptosFeatureFlag {
             },
             FeatureFlag::DefaultAccountResource => AptosFeatureFlag::DEFAULT_ACCOUNT_RESOURCE,
             FeatureFlag::JwkConsensusPerKeyMode => AptosFeatureFlag::JWK_CONSENSUS_PER_KEY_MODE,
+            FeatureFlag::EnableLazyLoading => AptosFeatureFlag::ENABLE_LAZY_LOADING,
         }
     }
 }
@@ -549,6 +551,7 @@ impl From<AptosFeatureFlag> for FeatureFlag {
             },
             AptosFeatureFlag::DEFAULT_ACCOUNT_RESOURCE => FeatureFlag::DefaultAccountResource,
             AptosFeatureFlag::JWK_CONSENSUS_PER_KEY_MODE => FeatureFlag::JwkConsensusPerKeyMode,
+            AptosFeatureFlag::ENABLE_LAZY_LOADING => FeatureFlag::EnableLazyLoading,
         }
     }
 }
