@@ -85,18 +85,21 @@ fn native_check_dispatch_type_compatibility_impl(
     let (rhs, rhs_id) = {
         let (module, func) = extract_function_info(&mut arguments)?;
 
-        let allow_non_visited_special_addresses =
-            context.get_feature_flags().is_account_abstraction_enabled()
-                || context
-                    .get_feature_flags()
-                    .is_derivable_account_abstraction_enabled();
-        context
-            .traversal_context()
-            .legacy_check_optional_is_special_or_visited(
-                module.address(),
-                module.name(),
-                allow_non_visited_special_addresses,
-            )
+        let check_visited = |a, n| {
+            let special_addresses_considered_visited =
+                context.get_feature_flags().is_account_abstraction_enabled()
+                    || context
+                        .get_feature_flags()
+                        .is_derivable_account_abstraction_enabled();
+            if special_addresses_considered_visited {
+                context
+                    .traversal_context()
+                    .check_is_special_or_visited(a, n)
+            } else {
+                context.traversal_context().legacy_check_visited(a, n)
+            }
+        };
+        check_visited(module.address(), module.name())
             .map_err(|_| SafeNativeError::Abort { abort_code: 2 })?;
 
         (

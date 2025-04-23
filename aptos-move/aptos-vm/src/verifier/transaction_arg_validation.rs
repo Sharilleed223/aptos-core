@@ -590,8 +590,8 @@ fn load_constructor_function(
         return Err(PartialVMError::new(StatusCode::ABORTED).finish(Location::Undefined));
     }
 
-    let mut map = BTreeMap::new();
-    if !match_return_type(&function.return_tys()[0], expected_return_ty, &mut map) {
+    let mut map = TypeParamMap::default();
+    if !map.match_ty(&function.return_tys()[0], expected_return_ty) {
         // For functions that are marked constructor this should not happen.
         return Err(
             PartialVMError::new(StatusCode::INVALID_MAIN_FUNCTION_SIGNATURE)
@@ -603,16 +603,7 @@ fn load_constructor_function(
     let num_ty_args = function.ty_param_abilities().len();
     let mut ty_args = Vec::with_capacity(num_ty_args);
     for i in 0..num_ty_args {
-        if let Some(t) = map.get(&(i as u16)) {
-            ty_args.push((*t).clone());
-        } else {
-            // Unknown type argument we are not able to infer the type arguments.
-            // For functions that are marked constructor this should not happen.
-            return Err(
-                PartialVMError::new(StatusCode::INVALID_MAIN_FUNCTION_SIGNATURE)
-                    .finish(Location::Undefined),
-            );
-        }
+        ty_args.push(map.get_ty_param(i as u16)?);
     }
 
     Type::verify_ty_arg_abilities(function.ty_param_abilities(), &ty_args)
@@ -625,114 +616,121 @@ fn load_constructor_function(
     })
 }
 
-/// Matches the actual returned type to the expected type, binding any type args to the necessary
-/// type as stored in the map. The expected type must be a concrete type (no [Type::TyParam]).
-/// Returns true if a successful match is made.
-// TODO: is this really needed in presence of paranoid mode? This does a deep structural
-//       comparison and is expensive.
-fn match_return_type<'a>(
-    returned: &Type,
-    expected: &'a Type,
-    map: &mut BTreeMap<u16, &'a Type>,
-) -> bool {
-    match (returned, expected) {
-        // The important case, deduce the type params.
-        (Type::TyParam(idx), _) => match map.entry(*idx) {
-            btree_map::Entry::Vacant(vacant_entry) => {
-                vacant_entry.insert(expected);
-                true
+#[derive(Default)]
+struct TypeParamMap<'a> {
+    map: BTreeMap<u16, &'a Type>,
+}
+
+impl<'a> TypeParamMap<'a> {
+    fn get_ty_param(&self, idx: u16) -> VMResult<Type> {
+        self.map.get(&idx).map(|ty| (*ty).clone()).ok_or_else(|| {
+            PartialVMError::new(StatusCode::INVALID_MAIN_FUNCTION_SIGNATURE)
+                .finish(Location::Undefined)
+        })
+    }
+
+    /// Matches the actual returned type to the expected type, binding any type args to the necessary
+    /// type as stored in the map. The expected type must be a concrete type (no [Type::TyParam]).
+    /// Returns true if a successful match is made.
+    // TODO: is this really needed in presence of paranoid mode? This does a deep structural
+    //       comparison and is expensive.
+    fn match_ty(&mut self, ty: &Type, expected: &'a Type) -> bool {
+        match (ty, expected) {
+            // The important case, deduce the type params.
+            (Type::TyParam(idx), _) => {
+                use btree_map::Entry::*;
+                match self.map.entry(*idx) {
+                    Occupied(occupied_entry) => *occupied_entry.get() == expected,
+                    Vacant(vacant_entry) => {
+                        vacant_entry.insert(expected);
+                        true
+                    },
+                }
             },
-            btree_map::Entry::Occupied(occupied_entry) => *occupied_entry.get() == expected,
-        },
-        // Recursive types we need to recurse the matching types.
-        (Type::Reference(ret_inner), Type::Reference(expected_inner))
-        | (Type::MutableReference(ret_inner), Type::MutableReference(expected_inner)) => {
-            match_return_type(ret_inner, expected_inner, map)
-        },
-        (Type::Vector(ret_inner), Type::Vector(expected_inner)) => {
-            match_return_type(ret_inner, expected_inner, map)
-        },
-        // Function types, the expected abilities need to be equal to the provided ones,
-        // and recursively argument and result types need to match.
-        (
-            Type::Function {
-                args,
-                results,
-                abilities,
+            // Recursive types we need to recurse the matching types.
+            (Type::Reference(inner), Type::Reference(expected_inner))
+            | (Type::MutableReference(inner), Type::MutableReference(expected_inner)) => {
+                self.match_ty(inner, expected_inner)
             },
-            Type::Function {
-                args: exp_args,
-                results: exp_results,
-                abilities: exp_abilities,
+            (Type::Vector(inner), Type::Vector(expected_inner)) => {
+                self.match_ty(inner, expected_inner)
             },
-        ) if abilities == exp_abilities
-            && args.len() == exp_args.len()
-            && results.len() == exp_results.len() =>
-        {
-            args.iter()
-                .zip(exp_args)
-                .all(|(t, e)| match_return_type(t, e, map))
-                && results
-                    .iter()
-                    .zip(exp_results)
-                    .all(|(t, e)| match_return_type(t, e, map))
-        },
-        // Abilities should not contribute to the equality check as they just serve for caching
-        // computations. For structs the both need to be the same struct.
-        (
-            Type::Struct { idx: ret_idx, .. },
-            Type::Struct {
-                idx: expected_idx, ..
+            // Function types, the expected abilities need to be equal to the provided ones,
+            // and recursively argument and result types need to match.
+            (
+                Type::Function {
+                    args,
+                    results,
+                    abilities,
+                },
+                Type::Function {
+                    args: exp_args,
+                    results: exp_results,
+                    abilities: exp_abilities,
+                },
+            ) if abilities == exp_abilities
+                && args.len() == exp_args.len()
+                && results.len() == exp_results.len() =>
+            {
+                args.iter().zip(exp_args).all(|(t, e)| self.match_ty(t, e))
+                    && results
+                        .iter()
+                        .zip(exp_results)
+                        .all(|(t, e)| self.match_ty(t, e))
             },
-        ) => *ret_idx == *expected_idx,
-        // For struct instantiations we need to additionally match all type arguments.
-        (
-            Type::StructInstantiation {
-                idx: ret_idx,
-                ty_args: ret_fields,
-                ..
+            // Abilities should not contribute to the equality check as they just serve for caching
+            // computations. For structs the both need to be the same struct.
+            (
+                Type::Struct { idx, .. },
+                Type::Struct {
+                    idx: expected_idx, ..
+                },
+            ) => *idx == *expected_idx,
+            // For struct instantiations we need to additionally match all type arguments.
+            (
+                Type::StructInstantiation { idx, ty_args, .. },
+                Type::StructInstantiation {
+                    idx: expected_idx,
+                    ty_args: expected_ty_args,
+                    ..
+                },
+            ) => {
+                *idx == *expected_idx
+                    && ty_args.len() == expected_ty_args.len()
+                    && ty_args
+                        .iter()
+                        .zip(expected_ty_args.iter())
+                        .all(|types| self.match_ty(types.0, types.1))
             },
-            Type::StructInstantiation {
-                idx: expected_idx,
-                ty_args: expected_fields,
-                ..
-            },
-        ) => {
-            *ret_idx == *expected_idx
-                && ret_fields.len() == expected_fields.len()
-                && ret_fields
-                    .iter()
-                    .zip(expected_fields.iter())
-                    .all(|types| match_return_type(types.0, types.1, map))
-        },
-        // For primitive types we need to assure the types match.
-        (Type::U8, Type::U8)
-        | (Type::U16, Type::U16)
-        | (Type::U32, Type::U32)
-        | (Type::U64, Type::U64)
-        | (Type::U128, Type::U128)
-        | (Type::U256, Type::U256)
-        | (Type::Bool, Type::Bool)
-        | (Type::Address, Type::Address)
-        | (Type::Signer, Type::Signer) => true,
-        // Otherwise the types do not match, and we can't match return type to the expected type.
-        // Note we don't use the _ pattern but spell out all cases, so that the compiler will
-        // bark when a case is missed upon future updates to the types.
-        (Type::U8, _)
-        | (Type::U16, _)
-        | (Type::U32, _)
-        | (Type::U64, _)
-        | (Type::U128, _)
-        | (Type::U256, _)
-        | (Type::Bool, _)
-        | (Type::Address, _)
-        | (Type::Signer, _)
-        | (Type::Struct { .. }, _)
-        | (Type::StructInstantiation { .. }, _)
-        | (Type::Function { .. }, _)
-        | (Type::Vector(_), _)
-        | (Type::MutableReference(_), _)
-        | (Type::Reference(_), _) => false,
+            // For primitive types we need to assure the types match.
+            (Type::U8, Type::U8)
+            | (Type::U16, Type::U16)
+            | (Type::U32, Type::U32)
+            | (Type::U64, Type::U64)
+            | (Type::U128, Type::U128)
+            | (Type::U256, Type::U256)
+            | (Type::Bool, Type::Bool)
+            | (Type::Address, Type::Address)
+            | (Type::Signer, Type::Signer) => true,
+            // Otherwise the types do not match, and we can't match return type to the expected type.
+            // Note we don't use the _ pattern but spell out all cases, so that the compiler will
+            // bark when a case is missed upon future updates to the types.
+            (Type::U8, _)
+            | (Type::U16, _)
+            | (Type::U32, _)
+            | (Type::U64, _)
+            | (Type::U128, _)
+            | (Type::U256, _)
+            | (Type::Bool, _)
+            | (Type::Address, _)
+            | (Type::Signer, _)
+            | (Type::Struct { .. }, _)
+            | (Type::StructInstantiation { .. }, _)
+            | (Type::Function { .. }, _)
+            | (Type::Vector(_), _)
+            | (Type::MutableReference(_), _)
+            | (Type::Reference(_), _) => false,
+        }
     }
 }
 

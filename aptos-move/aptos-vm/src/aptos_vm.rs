@@ -540,33 +540,25 @@ impl AptosVM {
         module_storage: &impl AptosModuleStorage,
         status: ExecutionStatus,
     ) -> ExecutionStatus {
-        use ExecutionStatus::*;
-        match status {
-            MoveAbort {
+        if let ExecutionStatus::MoveAbort {
+            location: AbortLocation::Module(module_id),
+            code,
+            ..
+        } = status
+        {
+            let info = module_storage
+                .fetch_module_metadata(module_id.address(), module_id.name())
+                .ok()
+                .flatten()
+                .and_then(|metadata| get_metadata(&metadata))
+                .and_then(|m| m.extract_abort_info(code));
+            ExecutionStatus::MoveAbort {
                 location: AbortLocation::Module(module_id),
                 code,
-                ..
-            } => {
-                let info = module_storage
-                    .fetch_module_metadata(module_id.address(), module_id.name())
-                    .ok()
-                    .flatten()
-                    .and_then(|metadata| get_metadata(&metadata))
-                    .and_then(|m| m.extract_abort_info(code));
-                MoveAbort {
-                    location: AbortLocation::Module(module_id),
-                    code,
-                    info,
-                }
-            },
-            MoveAbort {
-                location: AbortLocation::Script,
-                ..
+                info,
             }
-            | Success
-            | OutOfGas
-            | ExecutionFailure { .. }
-            | MiscellaneousError(_) => status,
+        } else {
+            status
         }
     }
 
@@ -812,7 +804,7 @@ impl AptosVM {
             code_storage.load_script(serialized_script.code(), serialized_script.ty_args())?;
 
         // Check that unstable bytecode cannot be executed on mainnet and verify events.
-        let script = func.expect_script()?;
+        let script = func.owner_as_script()?;
         self.reject_unstable_bytecode_for_script(script)?;
         event_validation::verify_no_event_emission_in_compiled_script(script)?;
 
@@ -882,7 +874,7 @@ impl AptosVM {
         if function.is_friend_or_private() {
             let maybe_randomness_annotation = get_randomness_annotation_for_entry_function(
                 entry_fn,
-                &function.expect_module()?.metadata,
+                &function.owner_as_module()?.metadata,
             );
             if maybe_randomness_annotation.is_some() {
                 session.mark_unbiasable();
@@ -900,15 +892,8 @@ impl AptosVM {
             struct_constructors_enabled,
         )?;
 
-        if !function.is_entry() {
-            let module_id = function.expect_module()?.self_id();
-            return Err(PartialVMError::new(
-                StatusCode::EXECUTE_ENTRY_FUNCTION_CALLED_ON_NON_ENTRY_FUNCTION,
-            )
-            .finish(Location::Module(module_id))
-            .into_vm_status());
-        }
-
+        // Execute the function. The function also must be an entry function!
+        function.is_entry_or_err()?;
         session.execute_loaded_function(
             function,
             args,
@@ -2347,7 +2332,7 @@ impl AptosVM {
         let mut traversal_context = TraversalContext::new(&traversal_storage);
 
         let func = module_storage.load_function(&module_id, &func_name, &ty_args)?;
-        let metadata = get_metadata(&func.expect_module()?.metadata);
+        let metadata = get_metadata(&func.owner_as_module()?.metadata);
 
         let arguments = view_function::validate_view_function(
             session,

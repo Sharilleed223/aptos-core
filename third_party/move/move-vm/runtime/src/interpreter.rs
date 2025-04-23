@@ -6,7 +6,7 @@ use crate::{
     access_control::AccessControlState,
     check_type_tag_dependencies_and_charge_gas,
     config::VMConfig,
-    data_cache::TransactionDataCache,
+    data_cache::{DataCacheEntry, TransactionDataCache},
     frame::Frame,
     frame_type_cache::{
         AllRuntimeCaches, FrameTypeCache, NoRuntimeCaches, PerInstructionCache, RuntimeCacheTraits,
@@ -1105,6 +1105,29 @@ impl InterpreterImpl<'_> {
         self.binop(|lhs, rhs| Ok(Value::bool(f(lhs, rhs)?)))
     }
 
+    /// Creates a data cache entry for the specified address-type pair. Charges gas for the number
+    /// of bytes loaded.
+    fn create_and_charge_data_cache_entry(
+        resource_resolver: &impl ResourceResolver,
+        module_storage: &impl ModuleStorage,
+        gas_meter: &mut impl GasMeter,
+        addr: AccountAddress,
+        ty: &Type,
+    ) -> PartialVMResult<DataCacheEntry> {
+        let (entry, bytes_loaded) =
+            TransactionDataCache::load_resource(module_storage, resource_resolver, &addr, ty)?;
+        gas_meter.charge_load_resource(
+            addr,
+            TypeWithRuntimeEnvironment {
+                ty,
+                runtime_environment: module_storage.runtime_environment(),
+            },
+            entry.value().view(),
+            bytes_loaded,
+        )?;
+        Ok(entry)
+    }
+
     /// Loads a resource from the data store and return the number of bytes read from the storage.
     fn load_resource<'c>(
         data_cache: &'c mut TransactionDataCache,
@@ -1115,18 +1138,12 @@ impl InterpreterImpl<'_> {
         ty: &Type,
     ) -> PartialVMResult<&'c mut GlobalValue> {
         if !data_cache.contains_resource(&addr, ty) {
-            let (entry, bytes_loaded) =
-                TransactionDataCache::load_resource(module_storage, resource_resolver, &addr, ty)?;
-
-            let runtime_environment = module_storage.runtime_environment();
-            gas_meter.charge_load_resource(
+            let entry = Self::create_and_charge_data_cache_entry(
+                resource_resolver,
+                module_storage,
+                gas_meter,
                 addr,
-                TypeWithRuntimeEnvironment {
-                    ty,
-                    runtime_environment,
-                },
-                entry.value().view(),
-                bytes_loaded,
+                ty,
             )?;
             data_cache.insert_resource(addr, ty.clone(), entry)?;
         }
@@ -2692,10 +2709,7 @@ impl Frame {
                         let vec_ref = interpreter.operand_stack.pop_as::<VectorRef>()?;
                         let (ty, ty_count) = frame_cache.get_signature_index_type(*si, self)?;
                         gas_meter.charge_create_ty(ty_count)?;
-                        gas_meter.charge_vec_len(TypeWithRuntimeEnvironment {
-                            ty,
-                            runtime_environment: module_storage.runtime_environment(),
-                        })?;
+                        gas_meter.charge_vec_len(make_ty!(ty))?;
                         let value = vec_ref.len(ty)?;
                         interpreter.operand_stack.push(value)?;
                     },

@@ -26,7 +26,7 @@ pub(crate) fn native_dispatch(
 ) -> SafeNativeResult<SmallVec<[Value; 1]>> {
     let (module_name, func_name) = extract_function_info(&mut arguments)?;
 
-    // Check if the module is already properly charged in this transaction.
+    // Check that the module is already properly charged in this transaction.
     context
         .traversal_context()
         .check_is_special_or_visited(module_name.address(), module_name.name())

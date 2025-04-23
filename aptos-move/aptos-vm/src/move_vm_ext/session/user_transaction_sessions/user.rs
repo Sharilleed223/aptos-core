@@ -104,10 +104,9 @@ impl<'r> UserSession<'r> {
 
             self.session.execute(|session| {
                 let module_id = module.self_id();
-                let init_func_result =
-                    staging_module_storage.load_function(&module_id, init_func_name, &[]);
-
-                if let Ok(init_func) = init_func_result {
+                if let Ok(init_func) =
+                    staging_module_storage.load_function(&module_id, init_func_name, &[])
+                {
                     // We need to check that init_module function we found is well-formed.
                     verifier::module_init::verify_module_init_function(module)
                         .map_err(|err| err.finish(Location::Undefined))?;

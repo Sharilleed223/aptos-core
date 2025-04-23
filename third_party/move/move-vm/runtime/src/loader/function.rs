@@ -81,7 +81,7 @@ impl LoadedFunction {
 
     /// Returns a reference to parent [Script] owning the script's entrypoint function. Returns an
     /// invariant violation error if the function comes from a module.
-    pub fn expect_script(&self) -> VMResult<&Script> {
+    pub fn owner_as_script(&self) -> VMResult<&Script> {
         match &self.owner {
             LoadedFunctionOwner::Script(script) => Ok(script.as_ref()),
             LoadedFunctionOwner::Module(_) => {
@@ -96,7 +96,7 @@ impl LoadedFunction {
 
     /// Returns a reference to parent [Module] owning the function. Returns an invariant violation
     /// error if the function comes from a script.
-    pub fn expect_module(&self) -> VMResult<&Module> {
+    pub fn owner_as_module(&self) -> VMResult<&Module> {
         match &self.owner {
             LoadedFunctionOwner::Module(module) => Ok(module.as_ref()),
             LoadedFunctionOwner::Script(_) => {
@@ -382,9 +382,16 @@ impl LoadedFunction {
         !self.function.is_friend_or_private()
     }
 
-    /// Returns true if the loaded function is an entry function.
-    pub fn is_entry(&self) -> bool {
-        self.function.is_entry()
+    /// Returns an error if the loaded function is **NOT** an entry function.
+    pub fn is_entry_or_err(&self) -> VMResult<()> {
+        if !self.function.is_entry() {
+            let module_id = self.owner_as_module()?.self_id().clone();
+            let err = PartialVMError::new(
+                StatusCode::EXECUTE_ENTRY_FUNCTION_CALLED_ON_NON_ENTRY_FUNCTION,
+            );
+            return Err(err.finish(Location::Module(module_id)));
+        }
+        Ok(())
     }
 
     /// Returns parameter types from the function's definition signature.

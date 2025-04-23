@@ -150,24 +150,24 @@ impl<'a, 'b> NativeContext<'a, 'b> {
         address: AccountAddress,
         ty: &Type,
     ) -> PartialVMResult<(bool, Option<NumBytes>)> {
-        // TODO(Rati, George): propagate exists call the way to resolver, because we
-        //                     can implement the check more efficiently, without the
-        //                     need to actually load bytes.
-        let bytes_loaded = if !self.data_store.contains_resource(&address, ty) {
+        // TODO(gelash, georgemitenkov):
+        //   propagate exists call all the way to resolver, because we can implement the check more
+        //   efficiently, without the need to actually load bytes.
+        Ok(if !self.data_store.contains_resource(&address, ty) {
             let (entry, bytes_loaded) = TransactionDataCache::load_resource(
                 self.module_storage,
                 self.resource_resolver,
                 &address,
                 ty,
             )?;
+            let exists = entry.value().exists()?;
             self.data_store
                 .insert_resource(address, ty.clone(), entry)?;
-            Some(bytes_loaded)
+            (exists, Some(bytes_loaded))
         } else {
-            None
-        };
-        let exists = self.data_store.get_resource_mut(&address, ty)?.exists()?;
-        Ok((exists, bytes_loaded))
+            let exists = self.data_store.get_resource_mut(&address, ty)?.exists()?;
+            (exists, None)
+        })
     }
 
     pub fn type_to_type_tag(&self, ty: &Type) -> PartialVMResult<TypeTag> {

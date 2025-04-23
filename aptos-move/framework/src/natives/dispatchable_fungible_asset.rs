@@ -27,18 +27,21 @@ pub(crate) fn native_dispatch(
     let (module_name, func_name) = extract_function_info(&mut arguments)?;
 
     // Check if the module is already properly charged in this transaction.
-    let allow_non_visited_special_addresses =
-        context.get_feature_flags().is_account_abstraction_enabled()
-            || context
-                .get_feature_flags()
-                .is_derivable_account_abstraction_enabled();
-    context
-        .traversal_context()
-        .legacy_check_optional_is_special_or_visited(
-            module_name.address(),
-            module_name.name(),
-            allow_non_visited_special_addresses,
-        )
+    let check_visited = |a, n| {
+        let special_addresses_considered_visited =
+            context.get_feature_flags().is_account_abstraction_enabled()
+                || context
+                    .get_feature_flags()
+                    .is_derivable_account_abstraction_enabled();
+        if special_addresses_considered_visited {
+            context
+                .traversal_context()
+                .check_is_special_or_visited(a, n)
+        } else {
+            context.traversal_context().legacy_check_visited(a, n)
+        }
+    };
+    check_visited(module_name.address(), module_name.name())
         .map_err(|_| SafeNativeError::Abort { abort_code: 4 })?;
 
     // Use Error to instruct the VM to perform a function call dispatch.

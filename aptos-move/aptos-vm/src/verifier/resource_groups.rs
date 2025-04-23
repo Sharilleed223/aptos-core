@@ -15,10 +15,7 @@ use move_binary_format::{
 use move_core_types::{language_storage::StructTag, vm_status::StatusCode};
 use move_vm_runtime::{module_traversal::TraversalContext, ModuleStorage};
 use move_vm_types::gas::GasMeter;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::Arc,
-};
+use std::collections::{BTreeMap, BTreeSet};
 
 fn metadata_validation_err(msg: &str) -> Result<(), VMError> {
     Err(metadata_validation_error(msg))
@@ -65,7 +62,7 @@ pub(crate) fn validate_resource_groups(
                 )?;
 
                 let (inner_groups, _, _) =
-                    extract_resource_group_metadata_from_module(Some(old_module))?;
+                    extract_resource_group_metadata_from_module(&old_module)?;
                 groups.insert(group_tag.module_id(), inner_groups);
             }
 
@@ -105,14 +102,16 @@ pub(crate) fn validate_module_and_extract_new_entries(
             (BTreeMap::new(), BTreeMap::new())
         };
 
-    let old_module_if_exists =
-        module_storage.fetch_deserialized_module(new_module.address(), new_module.name())?;
-    let (original_groups, original_members, mut structs) =
-        extract_resource_group_metadata_from_module(old_module_if_exists)?;
+    let (original_groups, original_members, mut structs) = module_storage
+        .fetch_deserialized_module(new_module.address(), new_module.name())?
+        .map_or_else(
+            || Ok((BTreeMap::new(), BTreeMap::new(), BTreeSet::new())),
+            |old_module| extract_resource_group_metadata_from_module(&old_module),
+        )?;
 
     for (member, group) in original_members {
         // We don't need to re-validate new_members above.
-        if Some(&group) != new_members.remove(&member).as_ref() {
+        if Some(group) != new_members.remove(&member) {
             metadata_validation_err("Invalid removal of resource_group_member attribute")?;
         }
 
@@ -160,20 +159,13 @@ pub(crate) fn validate_module_and_extract_new_entries(
 
 /// Given a module id extract all resource group metadata
 pub(crate) fn extract_resource_group_metadata_from_module(
-    old_module_if_exits: Option<Arc<CompiledModule>>,
+    old_module: &CompiledModule,
 ) -> VMResult<(
     BTreeMap<String, ResourceGroupScope>,
     BTreeMap<String, StructTag>,
     BTreeSet<String>,
 )> {
-    let old_module = match old_module_if_exits {
-        Some(old_module) => old_module,
-        None => {
-            return Ok((BTreeMap::new(), BTreeMap::new(), BTreeSet::new()));
-        },
-    };
-
-    if let Some(metadata) = get_metadata_from_compiled_code(old_module.as_ref()) {
+    if let Some(metadata) = get_metadata_from_compiled_code(old_module) {
         let (groups, members) = extract_resource_group_metadata(&metadata)?;
         let structs = old_module
             .struct_defs()

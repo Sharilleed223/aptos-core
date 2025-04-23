@@ -64,42 +64,43 @@ impl<'a> TraversalContext<'a> {
         !addr.is_special() && self.visited.insert((addr, name), ()).is_none()
     }
 
+    /// No-op if address is visited, otherwise returns an invariant violation error.
+    fn check_visited_impl(&self, addr: &AccountAddress, name: &IdentStr) -> PartialVMResult<()> {
+        if self.visited.contains_key(&(addr, name)) {
+            return Ok(());
+        }
+
+        let msg = format!("Module {}::{} has not been visited", addr, name);
+        Err(PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR).with_message(msg))
+    }
+
     /// Returns an error if the address is not special and is not in a visited set.
     pub fn check_is_special_or_visited(
         &self,
         addr: &AccountAddress,
         name: &IdentStr,
     ) -> PartialVMResult<()> {
-        if addr.is_special() || self.visited.contains_key(&(addr, name)) {
+        if addr.is_special() {
             return Ok(());
         }
 
-        let msg = format!("Module {}::{} has not been visited", addr, name);
-        Err(PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR).with_message(msg))
+        self.check_visited_impl(addr, name)
     }
 
-    /// If the flag is set, equivalent to [TraversalContext::check_is_special_or_visited]. If not
-    /// set, returns on error if the address is special but is not visited.
+    /// No-op if address is visited, otherwise returns an invariant violation error.
     ///
     /// Note: this is used ONLY by few existing native functions and exists purely for backwards-
     /// compatibility reasons.
-    pub fn legacy_check_optional_is_special_or_visited(
+    pub fn legacy_check_visited(
         &self,
         addr: &AccountAddress,
         name: &IdentStr,
-        allow_non_visited_special_addresses: bool,
     ) -> PartialVMResult<()> {
-        if (allow_non_visited_special_addresses && addr.is_special())
-            || self.visited.contains_key(&(addr, name))
-        {
-            return Ok(());
-        }
-
-        let msg = format!("Module {}::{} has not been visited", addr, name);
-        Err(PartialVMError::new(StatusCode::UNKNOWN_INVARIANT_VIOLATION_ERROR).with_message(msg))
+        self.check_visited_impl(addr, name)
     }
 
-    /// If address-name pairs are not special and have not been visited, pushes them to the stack.
+    /// If address-name pairs are not special and have not been visited, visits them and pushes
+    /// them to the provided stack.
     pub(crate) fn push_next_ids_to_visit<I>(
         &mut self,
         stack: &mut Vec<(&'a AccountAddress, &'a IdentStr)>,
@@ -140,13 +141,13 @@ mod test {
             .check_is_special_or_visited(special.address(), special.name())
             .expect("0x1 is special address and should not be visited");
         traversal_context
-            .legacy_check_optional_is_special_or_visited(special.address(), special.name(), false)
-            .expect("0x1 is special address and should not be visited");
+            .legacy_check_visited(special.address(), special.name())
+            .expect_err("0x1 is special address and should not be visited");
 
         assert!(!traversal_context.visit_if_not_special_address(special.address(), special.name()));
         assert!(traversal_context.visited.is_empty());
         traversal_context
-            .legacy_check_optional_is_special_or_visited(special.address(), special.name(), false)
+            .legacy_check_visited(special.address(), special.name())
             .expect_err("0x1 is special address but we don't allow them to be non-visited");
 
         let non_special = allocated_module_id(non_special);
