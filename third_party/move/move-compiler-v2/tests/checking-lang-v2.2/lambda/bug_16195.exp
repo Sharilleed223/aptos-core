@@ -1,0 +1,35 @@
+// -- Model dump before bytecode pipeline
+module 0xc0ffee::m {
+    struct Func {
+        0: |()||()|u64 with copy,
+    }
+    public fun test(): u64 {
+        {
+          let f: Func = pack m::Func(closure#0m::__lambda__2__test());
+          ((f)())()
+        }
+    }
+    private fun __lambda__1__test(): u64 {
+        42
+    }
+    private fun __lambda__2__test(): |()|u64 {
+        closure#0m::__lambda__1__test()
+    }
+} // end 0xc0ffee::m
+
+// -- Sourcified model before bytecode pipeline
+module 0xc0ffee::m {
+    struct Func has copy, drop {
+        0: |()||()|u64 with copy,
+    }
+    public fun test(): u64 {
+        let f = Func(|()| __lambda__2__test());
+        f()()
+    }
+    fun __lambda__1__test(): u64 {
+        42
+    }
+    fun __lambda__2__test(): |()|u64 {
+        |()| __lambda__1__test()
+    }
+}
