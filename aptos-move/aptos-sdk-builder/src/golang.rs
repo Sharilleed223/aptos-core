@@ -127,6 +127,7 @@ where
         );
         // Add standard imports
         external_definitions.insert("fmt".to_string(), Vec::new());
+        external_definitions.insert("errors".to_string(), Vec::new());
 
         let (transaction_script_abis, entry_fun_abis): (Vec<_>, Vec<_>) = abis
             .iter()
@@ -298,10 +299,10 @@ func DecodeEntryFunctionPayload(script aptostypes.TransactionPayload) (EntryFunc
                     val, err := helper(script)
                     return val, err
             }} else {{
-                    return nil, fmt.Errorf("Unknown entry function: %s::%s", script.Value.Module.Name, script.Value.Function)
+                    return nil, errors.New("Unknown entry function: %s::%s", script.Value.Module.Name, script.Value.Function)
             }}
         default:
-                return nil, fmt.Errorf("Unknown transaction payload encountered when decoding")
+                return nil, errors.New("Unknown transaction payload encountered when decoding")
     }}
 }}"#
         )
@@ -541,7 +542,7 @@ if val, err := {}; err == nil {{
         writeln!(
             self.out,
             r#"default:
-    return nil, fmt.Errorf("Unexpected TransactionPayload encountered when decoding a entry function")"#
+    return nil, errors.New("Unexpected TransactionPayload encountered when decoding a entry function")"#
         )?;
 
         self.out.unindent();
@@ -681,7 +682,7 @@ func decode_{0}_argument(arg aptostypes.TransactionArgument) (value {1}, err err
 	if arg, ok := arg.(*aptostypes.TransactionArgument__{2}); ok {{
 		{3}
 	}} else {{
-		err = fmt.Errorf("Was expecting a {2} argument")
+		err = errors.New("Was expecting a {2} argument")
 	}}
 	return
 }}
