@@ -691,7 +691,6 @@ impl BufferManager {
             executed_blocks,
             &self.epoch_state.verifier,
             self.end_epoch_timestamp.get().cloned(),
-            self.order_vote_enabled,
         );
         if let Some(commit_proof) = self.drain_pending_commit_proof_till(round) {
             if !new_item.is_aggregated()
